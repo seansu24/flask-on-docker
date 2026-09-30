@@ -4,9 +4,30 @@ services:
   web:
     build: ./services/web
     command: python manage.py run -h 0.0.0.0
+    # Called a bind mount bc lefthand starts with .
+    # Connects whatever is on the left to the right
+    # left is on your computer and right is whats on the container
     volumes:
       - ./services/web/:/usr/src/app/
     ports:
       - 1146:5000
     env_file:
       - ./.env.dev
+    depends_on:
+      - db
+  db:
+    image: postgres:13
+    # named value, does not begin with .
+    # "does not exist" on lambda server
+    # only exists in speacil remote palce with no direct access
+    # This is outside the container because we dont want the data
+    # disappear after shutting down the container
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=hello_flask
+      - POSTGRES_PASSWORD=hello_flask
+      - POSTGRES_DB=hello_flask_dev
+
+volumes:
+  postgres_data:
