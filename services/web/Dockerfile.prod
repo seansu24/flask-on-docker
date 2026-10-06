@@ -61,6 +61,9 @@ COPY ./entrypoint.prod.sh $APP_HOME
 # copy project
 COPY . $APP_HOME
 
+# create the media and static directories
+RUN mkdir -p $APP_HOME/project/media $APP_HOME/project/static
+
 # chown all the files to the app user
 RUN chown -R app:app $APP_HOME
 
