@@ -19,7 +19,7 @@ git clone https://github.com/seansu24/flask-on-docker.git
 cd flask-on-docker
 ```
 
-**2. Create `.env.dev`** — it holds the credentials and is not in version control:
+**2. Create the environment files** — these hold the configuration and are not in version control, so you have to create them. Paste this block to write all three at once:
 
 ```bash
 cat > .env.dev <<'EOF'
@@ -31,7 +31,27 @@ SQL_PORT=5432
 DATABASE=postgres
 APP_FOLDER=/usr/src/app
 EOF
+
+cat > .env.prod <<'EOF'
+FLASK_APP=project/__init__.py
+FLASK_DEBUG=0
+DATABASE_URL=postgresql://hello_flask:hello_flask@db:5432/hello_flask_prod
+SQL_HOST=db
+SQL_PORT=5432
+DATABASE=postgres
+APP_FOLDER=/home/app/web
+EOF
+
+cat > .env.prod.db <<'EOF'
+POSTGRES_USER=hello_flask
+POSTGRES_PASSWORD=hello_flask
+POSTGRES_DB=hello_flask_prod
+EOF
 ```
+
+`.env.dev` alone is enough for the development stack; the other two are only needed for production. `APP_FOLDER` differs between them because the production image installs the app under a non-root user's home directory.
+
+These are throwaway defaults for the local Postgres container, and the same credentials already appear in `docker-compose.yaml`. The `.env` files stay out of version control so that a real deployment can supply real credentials without them ever reaching Git.
 
 **3. Create the uploads folder** — Git does not track empty directories, so it is missing after a clone:
 
@@ -80,7 +100,7 @@ docker compose -f docker-compose.prod.yaml up -d --build
 docker compose -f docker-compose.prod.yaml exec web python manage.py create_db
 ```
 
-This needs `.env.prod` and `.env.prod.db`, which follow the same pattern as `.env.dev`. The site is again at <http://localhost:1146>, this time served through Nginx and Gunicorn.
+This uses the `.env.prod` and `.env.prod.db` files from step 2. The site is again at <http://localhost:1146>, this time served through Nginx and Gunicorn. The table creation is a separate command here because `entrypoint.prod.sh` deliberately leaves it out — a container restart should never drop a production table.
 
 ## Continuous Integration
 
