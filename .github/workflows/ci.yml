@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dev-stack:
+    name: Development stack builds and serves
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Write .env.dev
+        run: |
+          cat > .env.dev <<'EOF'
+          FLASK_APP=project/__init__.py
+          FLASK_DEBUG=1
+          DATABASE_URL=postgresql://hello_flask:hello_flask@db:5432/hello_flask_dev
+          SQL_HOST=db
+          SQL_PORT=5432
+          DATABASE=postgres
+          APP_FOLDER=/usr/src/app
+          EOF
+
+      - name: Ensure the bind-mounted media directory exists
+        run: mkdir -p services/web/project/media
+
+      - name: Build the development images
+        run: docker compose build
+
+      - name: Start the stack
+        run: docker compose up -d
+
+      - name: Wait for the web service to answer
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:1146/ >/dev/null 2>&1; then
+              echo "Web service responded after ${attempt} attempt(s)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Web service did not respond on port 1146 within 120 seconds."
+          exit 1
+
+      - name: Index route returns JSON
+        run: |
+          body=$(curl -fsS http://localhost:1146/)
+          echo "GET / -> ${body}"
+          echo "${body}" | grep -q '"hello"'
+
+      - name: Static files are served
+        run: |
+          body=$(curl -fsS http://localhost:1146/static/hello.txt)
+          echo "GET /static/hello.txt -> ${body}"
+          test -n "${body}"
+
+      - name: Upload form is reachable
+        run: curl -fsS http://localhost:1146/upload | grep -q 'type=file'
+
+      - name: Upload an image and read it back from /media
+        run: |
+          # A valid 1x1 PNG, used as the upload fixture.
+          base64 -d > fixture.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+          EOF
+          curl -fsS -F "file=@fixture.png" http://localhost:1146/upload >/dev/null
+          curl -fsS -o roundtrip.png http://localhost:1146/media/fixture.png
+          cmp fixture.png roundtrip.png
+          echo "Upload -> /media round trip succeeded."
+
+      - name: Print container logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  prod-image:
+    name: Production image builds and passes lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Write the production env files
+        run: |
+          cat > .env.prod <<'EOF'
+          FLASK_APP=project/__init__.py
+          FLASK_DEBUG=0
+          DATABASE_URL=postgresql://hello_flask:hello_flask@db:5432/hello_flask_prod
+          SQL_HOST=db
+          SQL_PORT=5432
+          DATABASE=postgres
+          APP_FOLDER=/home/app/web
+          EOF
+
+          cat > .env.prod.db <<'EOF'
+          POSTGRES_USER=hello_flask
+          POSTGRES_PASSWORD=hello_flask
+          POSTGRES_DB=hello_flask_prod
+          EOF
+
+      - name: Build the production images
+        # Dockerfile.prod runs flake8 in its builder stage, so this fails on a lint error.
+        run: docker compose -f docker-compose.prod.yaml build
